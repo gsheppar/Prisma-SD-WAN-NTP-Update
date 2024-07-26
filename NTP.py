@@ -2,15 +2,12 @@
 import cloudgenix
 import argparse
 from cloudgenix import jd, jd_detailed, jdout
-import yaml
 import cloudgenix_settings
 import sys
 import logging
-import ipcalc
 import os
 import datetime
 from csv import DictReader
-import ipcalc
 
 
 # Global Vars
@@ -49,7 +46,7 @@ except ImportError:
     CLOUDGENIX_USER = None
     CLOUDGENIX_PASSWORD = None
 
-def update(cgx, ntp_name_check):
+def update(cgx, ntp_name_check, domain):
     ntp_id = None
     ntp_hosts = None
     ntp_name = None
@@ -64,35 +61,73 @@ def update(cgx, ntp_name_check):
         print("No NTP name " + str(ntp_name) + " found")
         return
     
+    domain_id = None
+    if domain:
+        for binding in cgx.get.servicebindingmaps().cgx_content['items']:
+            if binding["name"] == domain:
+                domain_id = binding["id"]
+                
     for site in cgx.get.sites().cgx_content['items']:
-        for element in cgx.get.elements().cgx_content['items']:
-            sid = element['site_id']
-            model_name = element['model_name']
-            if element['site_id'] == site["id"]:
-                for ntp in cgx.get.ntp(element_id=element["id"]).cgx_content['items']:
-                    update = False
+        if site["element_cluster_role"] == "SPOKE":
+            if not domain_id:
+                if domain_id == site["service_binding"]:
+                    for element in cgx.get.elements().cgx_content['items']:
+                        sid = element['site_id']
+                        model_name = element['model_name']
+                        if element['site_id'] == site["id"]:
+                            for ntp in cgx.get.ntp(element_id=element["id"]).cgx_content['items']:
+                                update = False
                 
-                    if ntp["name"] != ntp_name:
-                        print("Updating due to wrong name")
-                        update = True
-                    elif ntp["ntp_servers"] != ntp_hosts:
-                        print("Update due to wrong ntp servers")
-                        update = True
-                    elif ntp["tags"] != ntp_tags:
-                        print("Update due to wrong ntp tags")
-                        update = True
+                                if ntp["name"] != ntp_name:
+                                    print("Updating due to wrong name")
+                                    update = True
+                                elif ntp["ntp_servers"] != ntp_hosts:
+                                    print("Update due to wrong ntp servers")
+                                    update = True
+                                elif ntp["tags"] != ntp_tags:
+                                    print("Update due to wrong ntp tags")
+                                    update = True
                 
-                    if update:
-                        ntp["name"] = ntp_name
-                        ntp["ntp_servers"] = ntp_hosts
-                        ntp["tags"] = ntp_tags
-                        resp = cgx.put.ntp(element_id=element["id"], ntp_id=ntp["id"], data=ntp)                 
-                        if not resp:
-                            print("Error updating NTP " + ntp_name_check +" on " + element["name"] + " site " + site["name"])
-                            print(str(jdout(resp)))
-                        print("Updating NTP " + ntp_name_check +" on " + element["name"] + " site " + site["name"])
-                    else:
-                        print("No updated required for NTP " + ntp_name_check +" on " + element["name"] + " site " + site["name"])
+                                if update:
+                                    ntp["name"] = ntp_name
+                                    ntp["ntp_servers"] = ntp_hosts
+                                    ntp["tags"] = ntp_tags
+                                    resp = cgx.put.ntp(element_id=element["id"], ntp_id=ntp["id"], data=ntp)                 
+                                    if not resp:
+                                        print("Error updating NTP " + ntp_name_check +" on " + element["name"] + " site " + site["name"])
+                                        print(str(jdout(resp)))
+                                    print("Updating NTP " + ntp_name_check +" on " + element["name"] + " site " + site["name"])
+                                else:
+                                    print("No updated required for NTP " + ntp_name_check +" on " + element["name"] + " site " + site["name"])
+            else:
+                for element in cgx.get.elements().cgx_content['items']:
+                    sid = element['site_id']
+                    model_name = element['model_name']
+                    if element['site_id'] == site["id"]:
+                        for ntp in cgx.get.ntp(element_id=element["id"]).cgx_content['items']:
+                            update = False
+                
+                            if ntp["name"] != ntp_name:
+                                print("Updating due to wrong name")
+                                update = True
+                            elif ntp["ntp_servers"] != ntp_hosts:
+                                print("Update due to wrong ntp servers")
+                                update = True
+                            elif ntp["tags"] != ntp_tags:
+                                print("Update due to wrong ntp tags")
+                                update = True
+                
+                            if update:
+                                ntp["name"] = ntp_name
+                                ntp["ntp_servers"] = ntp_hosts
+                                ntp["tags"] = ntp_tags
+                                resp = cgx.put.ntp(element_id=element["id"], ntp_id=ntp["id"], data=ntp)                 
+                                if not resp:
+                                    print("Error updating NTP " + ntp_name_check +" on " + element["name"] + " site " + site["name"])
+                                    print(str(jdout(resp)))
+                                print("Updating NTP " + ntp_name_check +" on " + element["name"] + " site " + site["name"])
+                            else:
+                                print("No updated required for NTP " + ntp_name_check +" on " + element["name"] + " site " + site["name"])
                     
     return
                                  
@@ -107,6 +142,7 @@ def go():
     # Allow Controller modification and debug level sets.
     config_group = parser.add_argument_group('Name', 'These options change how the configuration is loaded.')
     config_group.add_argument("--name", "-N", help="NTP Template", required=True, default=None)
+    config_group.add_argument("--domain", "-DN", help="NTP Template", required=False, default=None)
     controller_group = parser.add_argument_group('API', 'These options change how this program connects to the API.')
     controller_group.add_argument("--controller", "-C",
                                   help="Controller URI, ex. "
@@ -124,13 +160,8 @@ def go():
     debug_group.add_argument("--debug", "-D", help="Verbose Debug info, levels 0-2", type=int,
                              default=0)
     
-    # Allow Controller modification and debug level sets.
-    config_group = parser.add_argument_group('Config', 'These options change how the configuration is generated.')
-    config_group.add_argument("--destroy", help="DESTROY Syslog name",
-                              default=False, action="store_true")
                              
     args = vars(parser.parse_args())
-    destroy = args['destroy']
     
     ############################################################################
     # Instantiate API
@@ -189,9 +220,10 @@ def go():
     tenant_str = "".join(x for x in cgx_session.tenant_name if x.isalnum()).lower()
     cgx = cgx_session
     ntp_name_check = args["name"]
+    domain = args["domain"]
 
     
-    update(cgx, ntp_name_check) 
+    update(cgx, ntp_name_check, domain) 
     # end of script, run logout to clear session.
     print("End of script. Logout!")
     cgx_session.get.logout()
