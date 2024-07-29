@@ -8,6 +8,7 @@ import logging
 import os
 import datetime
 from csv import DictReader
+import time
 
 
 # Global Vars
@@ -66,10 +67,17 @@ def update(cgx, ntp_name_check, domain):
         for binding in cgx.get.servicebindingmaps().cgx_content['items']:
             if binding["name"] == domain:
                 domain_id = binding["id"]
-                
+    if not domain_id:
+        print("No domain found so will update all sites in 20 seconds")
+        num = 20
+        while num != 0:
+            print("Starting in " + str(num))
+            num -= 1
+        
+                    
     for site in cgx.get.sites().cgx_content['items']:
         if site["element_cluster_role"] == "SPOKE":
-            if not domain_id:
+            if domain_id:
                 if domain_id == site["service_binding"]:
                     for element in cgx.get.elements().cgx_content['items']:
                         sid = element['site_id']
